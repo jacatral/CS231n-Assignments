@@ -34,6 +34,10 @@ def svm_loss_naive(W, X, y, reg):
       margin = scores[j] - correct_class_score + 1 # note delta = 1
       if margin > 0:
         loss += margin
+        #  We want to move other class weights away from this vector
+        dW[:,j] += X[i]
+        #  We want to move the correct class weights towards this vector
+        dW[:,y[i]] -= X[i]
 
   # Right now the loss is a sum over all training examples, but we want it
   # to be an average instead so we divide by num_train.
@@ -41,16 +45,10 @@ def svm_loss_naive(W, X, y, reg):
 
   # Add regularization to the loss.
   loss += reg * np.sum(W * W)
-
-  #############################################################################
-  # TODO:                                                                     #
-  # Compute the gradient of the loss function and store it dW.                #
-  # Rather that first computing the loss and then computing the derivative,   #
-  # it may be simpler to compute the derivative at the same time that the     #
-  # loss is being computed. As a result you may need to modify some of the    #
-  # code above to compute the gradient.                                       #
-  #############################################################################
-
+  
+  # Gradient should be an average, as well have regularization added to it
+  dW /= num_train
+  dW += reg * W
 
   return loss, dW
 
@@ -63,30 +61,32 @@ def svm_loss_vectorized(W, X, y, reg):
   """
   loss = 0.0
   dW = np.zeros(W.shape) # initialize the gradient as zero
+  
+  num_train = X.shape[0]
+  
+  # Calculate scores & identify the correct class scores for each sample
+  scores = X.dot(W)
+  correct_scores = scores[np.arange(num_train),y]
+  
+  margins = np.maximum(0, scores - correct_scores[:, np.newaxis] + 1.0) # note delta = 1
+  margins[np.arange(num_train),y] = 0 # negate margin from correct class (margin in this case is 0 + delta)
 
-  #############################################################################
-  # TODO:                                                                     #
-  # Implement a vectorized version of the structured SVM loss, storing the    #
-  # result in loss.                                                           #
-  #############################################################################
-  pass
-  #############################################################################
-  #                             END OF YOUR CODE                              #
-  #############################################################################
+  # Sum up the loss, average it, and regularize
+  loss = np.sum(margins)
+  loss /= num_train
+  loss += reg * np.sum(W * W)
 
+  # Flag all instances of margins being too small
+  X_mask = np.zeros(margins.shape)
+  X_mask[margins > 0] = 1
 
-  #############################################################################
-  # TODO:                                                                     #
-  # Implement a vectorized version of the gradient for the structured SVM     #
-  # loss, storing the result in dW.                                           #
-  #                                                                           #
-  # Hint: Instead of computing the gradient from scratch, it may be easier    #
-  # to reuse some of the intermediate values that you used to compute the     #
-  # loss.                                                                     #
-  #############################################################################
-  pass
-  #############################################################################
-  #                             END OF YOUR CODE                              #
-  #############################################################################
+  # Count instances of small margins to reduce the correct class weight by
+  count = np.sum(X_mask,1)
+  X_mask[np.arange(num_train),y] = -count
+  
+  # Calculate gradient, as well as obtain its average & add regularization
+  dW += (X.T).dot(X_mask)
+  dW /= num_train
+  dW += reg*W
 
   return loss, dW
