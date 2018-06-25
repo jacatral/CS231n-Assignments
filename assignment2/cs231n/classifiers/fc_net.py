@@ -140,6 +140,10 @@ class FullyConnectedNet(object):
             self.params['W%d'%(i+1)] = weight_scale * np.random.randn(D, M)
             self.params['b%d'%(i+1)] = np.zeros(M)
 
+            if (self.normalization=='batchnorm' and i < self.num_layers-1):
+                self.params['beta%d'%(i+1)] = np.zeros(M)
+                self.params['gamma%d'%(i+1)] = np.ones(M)
+
         # When using dropout we need to pass a dropout_param dictionary to each
         # dropout layer so that the layer knows the dropout probability and the mode
         # (train / test). You can pass the same dropout_param to each dropout layer.
@@ -185,11 +189,19 @@ class FullyConnectedNet(object):
 
         layer = {}
         layer[0] = X
-        cache_layer = {}
+        norm_layer = {}
+        af_cache = {}
+        re_cache = {}
+        bn_cache = {}
         for i in range(1,self.num_layers):
-            layer[i], cache_layer[i] = affine_relu_forward(layer[i-1], self.params['W%d'%i], self.params['b%d'%i])
-
-        scores, cache_scores = affine_forward(layer[self.num_layers-1], self.params['W%d'%(self.num_layers)], self.params['b%d'%(self.num_layers)]) 
+            af_act, af_cache[i] = affine_forward(layer[i-1], self.params['W%d'%i], self.params['b%d'%i])
+            if self.normalization=='batchnorm':
+                bn_act, bn_cache[i] =  batchnorm_forward(af_act, self.params['gamma%d'%i], self.params['beta%d'%i], self.bn_params[i-1])
+                layer[i], re_cache[i] = relu_forward(bn_act)
+            else:
+                layer[i], re_cache[i] = relu_forward(af_act)
+            
+        scores, cache_scores = affine_forward(layer[self.num_layers-1], self.params['W%d'%(self.num_layers)], self.params['b%d'%(self.num_layers)])
 
         # If test mode return early
         if mode == 'test':
@@ -202,13 +214,19 @@ class FullyConnectedNet(object):
         # Regularization loss
         for i in range(1, self.num_layers+1):
             loss += 0.5 * self.reg * (self.params['W%d'%i] **2).sum()
-        
+
+        dnorm = {}
         dx = {}
         dx[self.num_layers], grads['W%d'%(self.num_layers)], grads['b%d'%(self.num_layers)] = affine_backward(dout, cache_scores)
         grads['W%d'%(self.num_layers)] += self.reg * self.params['W%d'%(self.num_layers)]
 
         for i in reversed(range(1, self.num_layers)):
-            dx[i], grads['W%d'%i], grads['b%d'%i] = affine_relu_backward(dx[i+1], cache_layer[i])
+            dx_relu = relu_backward(dx[i+1], re_cache[i])
+            if self.normalization=='batchnorm':
+                dx_bn, grads['gamma%d'%i], grads['beta%d'%i] = batchnorm_backward_alt(dx_relu, bn_cache[i])
+                dx[i], grads['W%d'%i], grads['b%d'%i] = affine_backward(dx_bn, af_cache[i])
+            else:
+                dx[i], grads['W%d'%i], grads['b%d'%i] = affine_backward(dx_relu, af_cache[i])
             grads['W%d'%i] += self.reg * self.params['W%d'%i]
 
         return loss, grads
